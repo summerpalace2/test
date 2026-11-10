@@ -72,6 +72,8 @@ python run.py            # 或 python -m medminer
 
 在 Windows 上双击 `build_windows.bat`（会建虚拟环境、装依赖、调用 PyInstaller），得到 `dist\MedMiner\MedMiner.exe`，把整个 `dist\MedMiner` 文件夹拷给别人即可运行，无需安装 Python。体积约 1GB 级(含 scikit-learn/SHAP/XGBoost/Qt)。
 
+**只要一个 exe 文件**：双击 `build_windows_onefile.bat`，得到单个 `dist\MedMiner.exe`（拷走即用）。代价是每次启动要先解压到临时目录，首次约 20–60 秒，且更容易被杀毒软件误报；追求启动速度或被拦截时请用上面的文件夹版。（单文件版尚未在 Windows 上实际构建验证。）
+
 **验证打包产物**：命令行运行 `MedMiner.exe --selftest`（无界面），会依次检查：读取 csv/txt/xlsx → 训练 5 种模型(含 XGBoost/LightGBM) → SHAP → 图表 → 聚类 → 导出 HTML/Word/Markdown/PDF → 构造 10 个页面，结果写入当前目录的 `selftest_result.txt`，末尾出现 `SELFTEST OK` 即完整。源码方式同样可用：`python run.py --selftest`。
 
 ## 7. 目录结构与 5 人分工建议

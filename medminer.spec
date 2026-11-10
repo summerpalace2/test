@@ -1,5 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller 打包配置：在 Windows 上运行 build_windows.bat 即可得到 dist/MedMiner/MedMiner.exe
+# PyInstaller 打包配置。
+#   文件夹版（默认，启动快）：build_windows.bat        -> dist/MedMiner/MedMiner.exe（需整个文件夹一起拷贝）
+#   单文件版（只有一个 exe）：build_windows_onefile.bat -> dist/MedMiner.exe（每次启动先解压到临时目录，较慢）
+import os
+
+ONEFILE = os.environ.get("MEDMINER_ONEFILE") == "1"
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dynamic_libs, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
@@ -37,5 +42,9 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="MedMiner", console=False, debug=False, strip=False, upx=False)
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="MedMiner")
+if ONEFILE:
+    exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="MedMiner", console=False, debug=False, strip=False, upx=False,
+              runtime_tmpdir=None)
+else:
+    exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="MedMiner", console=False, debug=False, strip=False, upx=False)
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="MedMiner")
