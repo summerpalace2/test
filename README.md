@@ -59,7 +59,10 @@ python run.py            # 或 python -m medminer
 
 ## 5. AI 模块
 
-- 支持：**Claude (Anthropic)**、OpenAI、DeepSeek、通义千问、智谱 GLM、Moonshot、**本地 Ollama**、任意 OpenAI 兼容接口。在“AI 分析 → 设置…”选择提供商、填 Key、点“测试连接”。
+- **多套模型配置**：在“AI 分析”页右上角点 **管理模型…**，每个服务商各存一套（服务商 + Base URL + 模型 + 你自己的 API Key），之后在顶部下拉框一键切换，互不覆盖。
+- 内置预设：**Claude (Anthropic)**、**OpenAI**、**智谱 GLM**、**DeepSeek**、通义千问、Moonshot、Google Gemini(OpenAI 兼容)、硅基流动、OpenRouter、**本地 Ollama**，以及 **自定义 (OpenAI 兼容 / Anthropic 兼容)**——任何中转/代理地址，选“自定义”填上 Base URL 和 Key 即可。
+- 点 **获取模型列表** 会向该服务商查询真实可用的模型；也可直接手填模型名。点 **测试连接** 验证 Key 和地址是否可用。
+- 使用的是“OpenAI 兼容”接口时，Base URL 填到 `/v1`（或服务商文档里的对应前缀）为止，软件会自动拼上 `/chat/completions`；Anthropic 协议拼 `/v1/messages`。
 - Key 也可用环境变量：`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` …
 - **隐私**：只发送统计摘要（均值、分布、指标表…），不发送逐行数据；文本列内容永不发送；默认**隐藏列名**(V1、V2…，回答里自动还原，**包括你提问里写的列名**)；默认**每次发送前弹出预览**，可看到将要发出的全部内容。用本地 Ollama 则数据完全不出本机。
 - Key 保存在 `~/.medminer/config.json`（Linux/macOS 权限 600；Windows 为普通用户文件），不会写进项目文件或报告。
@@ -84,7 +87,7 @@ medminer/
 │  │   persist.py images.py report.py                          模型保存与泄漏检测/图像/报告
 │  ├─ ai/                     config.py client.py context.py prompts.py
 │  └─ gui/                    state.py main_window.py theme.py + pages/ + widgets/
-├─ tests/                     115 个测试（pytest）
+├─ tests/                     123 个测试（pytest）
 └─ resources/sample/          示例数据
 ```
 

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
 from ..core import io as mio
+from .icons import logo_pixmap, nav_icon
 from .pages.data_page import DataPage
 from .state import AppState
 
@@ -43,19 +44,36 @@ class MainWindow(QMainWindow):
         h.setSpacing(0)
         nav = QFrame()
         nav.setObjectName("nav")
-        nav.setFixedWidth(176)
+        nav.setFixedWidth(190)
         nl = QVBoxLayout(nav)
         nl.setContentsMargins(0, 0, 0, 8)
         nl.setSpacing(0)
+        brand = QWidget()
+        bl = QHBoxLayout(brand)
+        bl.setContentsMargins(16, 20, 12, 16)
+        bl.setSpacing(10)
+        logo = QLabel()
+        logo.setPixmap(logo_pixmap(38))
+        logo.setFixedSize(38, 38)
+        bl.addWidget(logo)
+        names = QVBoxLayout()
+        names.setSpacing(0)
         b = QLabel("MedMiner")
         b.setObjectName("brand")
         bs = QLabel("医学数据挖掘平台")
         bs.setObjectName("brandSub")
-        nl.addWidget(b)
-        nl.addWidget(bs)
+        names.addWidget(b)
+        names.addWidget(bs)
+        bl.addLayout(names, 1)
+        nl.addWidget(brand)
         self.nav = QListWidget()
         self.nav.setObjectName("navList")
+        self.nav.setIconSize(QSize(22, 22))
+        self.nav.setFocusPolicy(Qt.NoFocus)
         nl.addWidget(self.nav, 1)
+        ver = QLabel(f"v{__version__}  ·  仅供教学研究")
+        ver.setObjectName("navVersion")
+        nl.addWidget(ver)
         h.addWidget(nav)
         self.stack = QStackedWidget()
         h.addWidget(self.stack, 1)
@@ -77,7 +95,8 @@ class MainWindow(QMainWindow):
         p = cls(self.state)
         self.pages[p.key] = p
         self.stack.addWidget(p)
-        it = QListWidgetItem(f"  {self.nav.count() + 1}  {p.title}")
+        it = QListWidgetItem(nav_icon(p.key), f"  {p.title}")
+        it.setSizeHint(QSize(150, 42))
         self.nav.addItem(it)
 
     def goto(self, key: str):

@@ -1,8 +1,8 @@
 """⑨ AI 分析：把各步结果的统计摘要交给大模型解读，支持流式输出、追问、发送前预览。"""
 from __future__ import annotations
 
+import html
 import time
-from dataclasses import asdict
 
 import pandas as pd
 from PySide6.QtCore import QThread, QTimer, Qt, Signal
@@ -12,11 +12,12 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from ...ai import context as actx
 from ...ai import prompts
-from ...ai.client import LLMError, stream_chat, test_connection
-from ...ai.config import PRESETS, LLMConfig, save_config
+from ...ai.client import LLMError, stream_chat
+from ...ai.config import LLMConfig, save_config
 from ...core.medical import binary_confusion_metrics
-from ..widgets.mdview import MarkdownView
+from ..widgets.mdview import MarkdownView, md_to_html
 from .base import Page, group, h1, hint, scroll
+from .model_manager import ModelManagerDialog
 
 
 class StreamWorker(QThread):
@@ -41,130 +42,6 @@ class StreamWorker(QThread):
             self.failed.emit(str(e))
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")
-
-
-class PingWorker(QThread):
-    ok = Signal(str)
-    failed = Signal(str)
-
-    def __init__(self, cfg: LLMConfig, parent=None):
-        super().__init__(parent)
-        self.cfg = cfg
-
-    def run(self):
-        try:
-            self.ok.emit(test_connection(self.cfg))
-        except LLMError as e:
-            self.failed.emit(str(e))
-        except Exception as e:
-            self.failed.emit(f"{type(e).__name__}: {e}")
-
-
-class SettingsDialog(QDialog):
-    def __init__(self, cfg: LLMConfig, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("大模型设置")
-        self.resize(560, 520)
-        self.cfg = LLMConfig(**asdict(cfg))
-        self._ping: PingWorker | None = None
-        l = QVBoxLayout(self)
-        f = QFormLayout()
-        self.preset = QComboBox()
-        self.preset.addItems(list(PRESETS))
-        self.preset.setCurrentText(self.cfg.preset if self.cfg.preset in PRESETS else "自定义 (OpenAI 兼容)")
-        self.preset.activated.connect(self._preset_changed)
-        self.base = QLineEdit(self.cfg.base_url)
-        self.model = QComboBox()
-        self.model.setEditable(True)
-        self.key = QLineEdit(self.cfg.api_key)
-        self.key.setEchoMode(QLineEdit.Password)
-        self.key.setPlaceholderText("留空则读取环境变量（如 ANTHROPIC_API_KEY / DEEPSEEK_API_KEY）")
-        self.show_key = QCheckBox("显示")
-        self.show_key.toggled.connect(lambda on: self.key.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password))
-        kr = QHBoxLayout()
-        kr.addWidget(self.key, 1)
-        kr.addWidget(self.show_key)
-        self.temp = QDoubleSpinBox()
-        self.temp.setRange(0, 1.5)
-        self.temp.setSingleStep(0.1)
-        self.temp.setValue(self.cfg.temperature)
-        self.maxtok = QSpinBox()
-        self.maxtok.setRange(256, 32000)
-        self.maxtok.setSingleStep(256)
-        self.maxtok.setValue(self.cfg.max_tokens)
-        self.timeout = QSpinBox()
-        self.timeout.setRange(10, 600)
-        self.timeout.setValue(int(self.cfg.timeout))
-        f.addRow("模型提供商", self.preset)
-        f.addRow("接口地址 Base URL", self.base)
-        f.addRow("模型名称", self.model)
-        f.addRow("API Key", kr)
-        f.addRow("温度", self.temp)
-        f.addRow("最大输出 token", self.maxtok)
-        f.addRow("超时（秒）", self.timeout)
-        l.addLayout(f)
-        self.anon = QCheckBox("隐藏列名（发送 V1、V2… 代号，回答里自动还原）")
-        self.anon.setChecked(self.cfg.anonymize)
-        self.desc = QCheckBox("发送列的中文说明（隐藏列名时自动不发送）")
-        self.desc.setChecked(self.cfg.send_descriptions)
-        self.prev = QCheckBox("每次发送前先预览将要发送的内容")
-        self.prev.setChecked(self.cfg.preview_before_send)
-        for c in (self.anon, self.desc, self.prev):
-            l.addWidget(c)
-        l.addWidget(hint("隐私：只发送统计摘要（均值、分布、指标表等），不发送逐行患者数据；文本列的内容永不发送。"
-                         "使用“本地 Ollama”时数据完全不出本机。API Key 保存在用户目录 ~/.medminer/config.json（权限 600），不会写入项目文件或报告。"))
-        self.msg = hint("")
-        l.addWidget(self.msg)
-        bb = QDialogButtonBox()
-        self.btn_test = bb.addButton("测试连接", QDialogButtonBox.ActionRole)
-        bb.addButton("保存", QDialogButtonBox.AcceptRole)
-        bb.addButton("取消", QDialogButtonBox.RejectRole)
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
-        self.btn_test.clicked.connect(self._test)
-        l.addWidget(bb)
-        self._fill_models(self.cfg.model)
-
-    def _fill_models(self, current: str):
-        p = PRESETS.get(self.preset.currentText(), {})
-        self.model.clear()
-        self.model.addItems(p.get("models", []))
-        self.model.setCurrentText(current)
-
-    def _preset_changed(self):
-        name = self.preset.currentText()
-        p = PRESETS[name]
-        self.base.setText(p["base_url"])
-        self._fill_models(p["model"])
-
-    def result_config(self) -> LLMConfig:
-        c = self.cfg
-        name = self.preset.currentText()
-        c.preset = name
-        c.protocol = PRESETS[name]["protocol"]
-        c.base_url = self.base.text().strip()
-        c.model = self.model.currentText().strip()
-        c.api_key = self.key.text().strip()
-        c.temperature = self.temp.value()
-        c.max_tokens = self.maxtok.value()
-        c.timeout = float(self.timeout.value())
-        c.anonymize = self.anon.isChecked()
-        c.send_descriptions = self.desc.isChecked()
-        c.preview_before_send = self.prev.isChecked()
-        return c
-
-    def _test(self):
-        cfg = self.result_config()
-        ok, why = cfg.is_ready()
-        if not ok:
-            self.msg.setText(why)
-            return
-        self.msg.setText("正在测试连接…")
-        self.btn_test.setEnabled(False)
-        self._ping = PingWorker(cfg, self)
-        self._ping.ok.connect(lambda r: (self.msg.setText(f"连接成功，模型回复：{r}"), self.btn_test.setEnabled(True)))
-        self._ping.failed.connect(lambda m: (self.msg.setText(f"失败：{m}"), self.btn_test.setEnabled(True)))
-        self._ping.start()
 
 
 class PreviewDialog(QDialog):
@@ -212,9 +89,17 @@ class AIPage(Page):
         top.addWidget(h1("AI 分析"))
         top.addStretch(1)
         self.cfg_lbl = QLabel("")
+        self.cfg_lbl.setObjectName("hint")
         top.addWidget(self.cfg_lbl)
-        b = QPushButton("设置…")
-        b.clicked.connect(self._settings)
+        top.addWidget(QLabel("当前模型："))
+        self.model_combo = QComboBox()
+        self.model_combo.setMinimumWidth(280)
+        self.model_combo.setToolTip("在已保存的模型配置之间切换（每套配置有各自的 Base URL 和 Key）")
+        self.model_combo.activated.connect(self._pick_profile)
+        top.addWidget(self.model_combo)
+        b = QPushButton("管理模型…")
+        b.setObjectName("primary")
+        b.clicked.connect(self._manage)
         top.addWidget(b)
         lay.addLayout(top)
         lay.addWidget(hint("大模型只会收到统计摘要（不含逐行患者数据）。回答仅供教学研究参考，请结合专业知识核对其中的数字与结论。"))
@@ -284,7 +169,25 @@ class AIPage(Page):
     def _update_cfg(self):
         c = self.state.llm
         ok, why = c.is_ready()
-        self.cfg_lbl.setText(f"模型：{c.preset} / {c.model}　隐藏列名：{'开' if c.anonymize else '关'}" + ("" if ok else f"　⚠ {why}"))
+        self.cfg_lbl.setText(f"隐藏列名：{'开' if c.anonymize else '关'}" + ("" if ok else f"　⚠ {why}"))
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        for p in c.profiles:
+            self.model_combo.addItem(f"{p['name']} · {p['model'] or '未选模型'}", p["name"])
+        if c.active_name not in c.profile_names():  # 当前是没保存过的临时配置
+            self.model_combo.insertItem(0, f"（临时）{c.preset} · {c.model or '未选模型'}", None)
+        i = self.model_combo.findData(c.active_name or None)
+        self.model_combo.setCurrentIndex(max(0, i))
+        self.model_combo.blockSignals(False)
+
+    def _pick_profile(self, index: int):
+        name = self.model_combo.itemData(index)
+        if name and self.state.llm.activate(name):
+            try:
+                save_config(self.state.llm)
+            except OSError as e:
+                self.error("配置未能保存", str(e))
+            self.state.config_changed.emit()
 
     def _on_dataset(self):
         self._clear()
@@ -395,7 +298,7 @@ class AIPage(Page):
         ok, why = self.state.llm.is_ready()
         if not ok:
             if QMessageBox.question(self, "尚未配置大模型", f"{why}\n\n现在去设置？") == QMessageBox.Yes:
-                self._settings()
+                self._manage()
             return False
         if self.worker and self.worker.isRunning():
             return False
@@ -502,22 +405,23 @@ class AIPage(Page):
         self._last_render = time.time()
         if not self.transcript:
             self.view.set_markdown("### 开始分析\n左侧按钮会把当前结果的**统计摘要**发给大模型并给出解读；也可以直接在下方提问。\n\n"
-                                   "- 首次使用请先点右上角“设置…”填写 API Key（或选择本地 Ollama）\n"
+                                   "- 首次使用请点右上角“管理模型…”，选服务商（Claude / OpenAI / 智谱 GLM / DeepSeek …）并填上你自己的 API Key，也可选本地 Ollama\n"
                                    "- 默认隐藏列名、每次发送前可预览内容，以保护隐私\n"
                                    "- 回答里的数字请与结果页核对")
             return
         parts = []
         for role, text in self.transcript:
             if role == "user":
-                parts.append(f"**你：** {text}")
+                parts.append("<table width='100%' cellpadding='9' cellspacing='0'><tr><td bgcolor='#EAF1FF'>"
+                             f"<b style='color:#2459B5'>你</b>&nbsp; {html.escape(text)}</td></tr></table>")
             else:
-                shown = self.anon.restore(text) if text else "*思考中…*"
-                parts.append(f"**AI：**\n\n{shown}")
-        self.view.set_markdown("\n\n---\n\n".join(parts))
+                shown = md_to_html(self.anon.restore(text)) if text else "<i style='color:#8A94A6'>思考中…</i>"
+                parts.append(f"<p style='margin:10px 0 2px 0'><b style='color:#146356'>AI</b></p>{shown}")
+        self.view.set_html_body("<br>".join(parts))
 
     # ---------- 其它 ----------
-    def _settings(self):
-        dlg = SettingsDialog(self.state.llm, self)
+    def _manage(self):
+        dlg = ModelManagerDialog(self.state.llm, self)
         if dlg.exec():
             self.state.llm = dlg.result_config()
             try:

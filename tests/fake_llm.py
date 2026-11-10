@@ -15,6 +15,13 @@ class FakeLLM:
             def log_message(self, *a):
                 pass
 
+            def do_GET(self):  # GET /models：模型列表
+                outer.requests.append({"path": self.path, "headers": dict(self.headers), "body": {"method": "GET"}})
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"data": [{"id": "m2"}, {"id": "m1"}]}).encode())
+
             def do_POST(self):
                 n = int(self.headers.get("content-length", 0))
                 body = json.loads(self.rfile.read(n) or b"{}")
@@ -55,4 +62,4 @@ class FakeLLM:
 
     def user_text(self) -> str:
         """所有请求中 role=user 的消息正文（不含 JSON 键名和系统提示）。"""
-        return "\n".join(m["content"] for r in self.requests for m in r["body"]["messages"] if m["role"] == "user")
+        return "\n".join(m["content"] for r in self.requests for m in r["body"].get("messages", []) if m["role"] == "user")

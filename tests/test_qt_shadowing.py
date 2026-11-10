@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication, QWidget
 
 # 有意覆盖的 Qt 虚函数
-INTENTIONAL = {"keyPressEvent", "dropEvent", "dragEnterEvent", "rowCount", "columnCount", "data", "headerData", "sort", "run"}
+INTENTIONAL = {"keyPressEvent", "dropEvent", "dragEnterEvent", "rowCount", "columnCount", "data", "headerData", "sort", "run", "done"}
 
 
 def _is_signal(v) -> bool:
@@ -25,9 +25,12 @@ def test_no_member_shadows_qt_api(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     from medminer.gui.main_window import MainWindow
     win = MainWindow()
+    from medminer.ai.config import LLMConfig
+    from medminer.gui.pages.model_manager import ModelManagerDialog
+    dlg = ModelManagerDialog(LLMConfig())  # 对话框也要检查
     qt_names = set(dir(QWidget)) | set(dir(QObject))
     problems = []
-    for obj in [win] + win.findChildren(QObject):
+    for obj in [win, dlg] + win.findChildren(QObject) + dlg.findChildren(QObject):
         cls = type(obj)
         if not cls.__module__.startswith("medminer"):
             continue  # 只检查我们自己写的类

@@ -218,3 +218,77 @@ def test_drag_drop_and_project(win, app, sample_dir, tmp_path):
     from medminer.core.dataset import load_project, save_project
     save_project(win.state.ds, tmp_path / "p.medproj")
     assert load_project(tmp_path / "p.medproj").raw.shape == (303, 14)
+
+
+# ---------- 模型管理 ----------
+def test_model_manager_keeps_each_providers_key_and_fetches_models(app):
+    from medminer.ai.config import LLMConfig
+    from medminer.gui.pages.model_manager import ModelManagerDialog
+    dlg = ModelManagerDialog(LLMConfig())
+    assert len(dlg.profiles) == 1 and dlg.name_edit.text() == "Claude" and dlg.url_edit.text() == "https://api.anthropic.com"
+    dlg.key_edit.setText("sk-claude")
+    for preset, key in (("DeepSeek", "sk-ds"), ("智谱 GLM", "sk-glm"), ("OpenAI", "sk-oa")):
+        dlg._add(preset)
+        assert dlg.key_edit.text() == ""  # 新配置不继承上一个的 Key
+        dlg.key_edit.setText(key)
+    assert dlg.listing.count() == 4 and dlg.url_edit.text() == "https://api.openai.com/v1"
+    dlg.listing.setCurrentRow(2)  # 切到智谱
+    assert dlg.name_edit.text() == "智谱 GLM" and dlg.key_edit.text() == "sk-glm" and dlg.url_edit.text() == "https://open.bigmodel.cn/api/paas/v4"
+    dlg.listing.setCurrentRow(0)  # 切回 Claude：Key 仍在，协议是 Anthropic
+    assert dlg.key_edit.text() == "sk-claude" and dlg.proto_box.currentData() == "anthropic"
+    dlg._add("DeepSeek")  # 重名自动加序号
+    assert dlg.name_edit.text() == "DeepSeek (2)"
+    with FakeLLM() as srv:
+        dlg._add("自定义 (OpenAI 兼容)")
+        dlg.name_edit.setText("学校中转")
+        dlg.url_edit.setText(srv.base_url)
+        dlg.key_edit.setText("relay-key")
+        dlg._fetch()
+        assert wait_for(app, lambda: dlg.model_box.findText("m2") >= 0, 20) and dlg.model_box.findText("m1") >= 0
+        dlg.model_box.setCurrentText("m2")
+        dlg._test()
+        assert wait_for(app, lambda: "连接成功" in dlg.status.text(), 20)
+        out = dlg.result_config()
+        gets = [r for r in srv.requests if r["body"].get("method") == "GET"]
+        assert gets and gets[0]["headers"].get("authorization") == "Bearer relay-key"
+    assert out.active_name == "学校中转" and out.base_url == srv.base_url and out.model == "m2" and out.api_key == "relay-key"
+    by = {p["name"]: p for p in out.profiles}
+    assert by["Claude"]["api_key"] == "sk-claude" and by["DeepSeek"]["api_key"] == "sk-ds" and by["OpenAI"]["api_key"] == "sk-oa"
+    assert len(out.profiles) == 6
+    dlg.listing.setCurrentRow(1)
+    dlg._delete()
+    names = dlg.result_config().profile_names()
+    assert "DeepSeek" not in names and "DeepSeek (2)" in names and len(names) == 5  # 只删掉了选中的那一套
+
+
+def test_ai_page_header_switches_profiles_and_persists(win, app):
+    from medminer.ai import config as aicfg
+    st = win.state
+    c = st.llm
+    for preset, key in (("Claude (Anthropic)", "k-claude"), ("DeepSeek", "k-ds")):
+        c.apply_preset(preset)
+        c.api_key = key
+        c.upsert_profile(c.current_as_profile(preset.split(" ")[0]))
+    c.activate("Claude")
+    ap = win.pages["ai"]
+    ap._update_cfg()
+    assert [ap.model_combo.itemData(i) for i in range(ap.model_combo.count())] == ["Claude", "DeepSeek"]
+    ap.model_combo.setCurrentIndex(1)
+    ap._pick_profile(1)
+    assert st.llm.active_name == "DeepSeek" and st.llm.base_url == "https://api.deepseek.com/v1" and st.llm.api_key == "k-ds"
+    assert aicfg.load_config().active_name == "DeepSeek"  # 切换已落盘，下次启动仍是它
+    assert ap.model_combo.currentData() == "DeepSeek"
+
+
+def test_plot_toolbar_icons_visible_with_theme(app):
+    """真实事故：QToolBar { background: transparent } 会让 matplotlib 工具栏图标整排消失。"""
+    from medminer.gui.widgets.plotwidget import PlotWidget
+    w = PlotWidget()
+    w.resize(700, 300)
+    w.show()
+    app.processEvents()
+    img = w.toolbar.grab().toImage()
+    dark = sum(1 for x in range(img.width()) for y in range(img.height())
+               if (c := img.pixelColor(x, y)).red() < 140 and c.green() < 140 and c.blue() < 140 and c.alpha() > 0)
+    w.close()
+    assert dark > 500, f"工具栏图标没有画出来（深色像素 {dark}）"

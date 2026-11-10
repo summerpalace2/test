@@ -8,3 +8,5 @@ dist/
 *.medproj
 *.joblib
 .DS_Store
+
+cachedir/

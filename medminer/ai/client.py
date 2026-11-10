@@ -117,6 +117,40 @@ def chat(cfg: LLMConfig, messages: list[dict], system: str | None = None, **kw) 
     return "".join(stream_chat(cfg, messages, system, **kw))
 
 
+def list_models(cfg: LLMConfig, transport: httpx.BaseTransport | None = None) -> list[str]:
+    """向服务商查询可用模型（GET /models），返回排序后的模型名。出错抛 LLMError。
+    不要求已选模型；Gemini 等返回的 “models/xxx” 会去掉前缀。"""
+    if not cfg.base_url:
+        raise LLMError("请先填写接口地址（Base URL）")
+    if cfg.needs_key() and not cfg.effective_key():
+        raise LLMError("请先填写 API Key，再获取模型列表")
+    base = cfg.base_url.rstrip("/")
+    url = base + ("/models" if base.endswith("/v1") else "/v1/models") if cfg.protocol == "anthropic" else base + "/models"
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0, connect=15.0), transport=transport) as client:
+            r = client.get(url, headers=_headers(cfg), params={"limit": 1000} if cfg.protocol == "anthropic" else None)
+    except httpx.ConnectError as e:
+        raise LLMError(f"无法连接到 {cfg.base_url}：请检查网络/代理/接口地址（{e}）") from e
+    except httpx.TimeoutException as e:
+        raise LLMError("请求超时：网络不稳定或服务响应过慢") from e
+    except httpx.HTTPError as e:
+        raise LLMError(f"网络错误：{type(e).__name__}: {e}") from e
+    if r.status_code != 200:
+        raise LLMError(_friendly(r.status_code, r.text, cfg) + "（该服务商可能不提供模型列表接口，可直接手填模型名）")
+    try:
+        items = r.json().get("data") or r.json().get("models") or []
+    except ValueError as e:
+        raise LLMError("服务商返回的不是有效的 JSON，无法解析模型列表") from e
+    ids = []
+    for it in items:
+        mid = it.get("id") or it.get("name") if isinstance(it, dict) else it
+        if isinstance(mid, str) and mid:
+            ids.append(mid.removeprefix("models/"))
+    if not ids:
+        raise LLMError("接口可以访问，但没有返回任何模型")
+    return sorted(set(ids))
+
+
 def test_connection(cfg: LLMConfig, transport: httpx.BaseTransport | None = None) -> str:
     """发一个极短请求验证配置，返回模型回复（出错抛 LLMError）。"""
     small = LLMConfig(**{**cfg.__dict__, "max_tokens": 32, "timeout": 30.0})

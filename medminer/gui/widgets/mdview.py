@@ -23,6 +23,11 @@ class MarkdownView(QTextBrowser):
         self.setOpenExternalLinks(True)
         self.document().setDefaultStyleSheet(CSS)
 
+    def set_html_body(self, body: str):
+        self.setHtml(f"<style>{CSS}</style>{body}")
+        sb = self.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
     def set_markdown(self, text: str):
         self.setHtml(md_to_html(text))
         sb = self.verticalScrollBar()
